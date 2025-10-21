@@ -3,8 +3,6 @@ import zipfile
 import numpy as np
 import tensorflow as tf
 import pandas as pd
-import idx2numpy
-from io import BytesIO
 import tempfile
 
 def load_data_from_zip_or_csv(uploaded_file):
@@ -18,27 +16,28 @@ def load_data_from_zip_or_csv(uploaded_file):
         class_names = sorted(df.iloc[:, -1].unique().astype(str))
         return X, y, class_names
 
-    # Case 2: ZIP file
+    # Case 2: ZIP dataset
     elif filename.endswith(".zip"):
         with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
             with tempfile.TemporaryDirectory() as tmpdirname:
                 zip_ref.extractall(tmpdirname)
-                
-                # Look for MNIST/Fashion-MNIST format (idx files)
-                idx_files = [f for f in os.listdir(tmpdirname) if f.endswith(".idx") or "idx" in f]
-                if len(idx_files) >= 4:  # typical number of MNIST files
-                    try:
-                        # Try to infer whether it's MNIST or Fashion-MNIST
-                        print("Detected MNIST-style dataset")
+                files = os.listdir(tmpdirname)
+
+                # ✅ Detect MNIST / Fashion-MNIST format (idx files)
+                if any("idx" in f for f in files):
+                    # Check which one it might be
+                    if any("fashion" in f for f in files):
+                        (X_train, y_train), _ = tf.keras.datasets.fashion_mnist.load_data()
+                    else:
                         (X_train, y_train), _ = tf.keras.datasets.mnist.load_data()
-                        X = X_train.reshape((X_train.shape[0], -1)) / 255.0
-                        y = y_train
-                        class_names = [str(i) for i in sorted(np.unique(y))]
-                        return X, y, class_names
-                    except Exception:
-                        raise ValueError("MNIST-style data found but could not be parsed.")
-                
-                # Otherwise, treat as image folders
+
+                    # Flatten and normalize
+                    X = X_train.reshape((X_train.shape[0], -1)).astype("float32") / 255.0
+                    y = y_train
+                    class_names = [str(i) for i in sorted(np.unique(y))]
+                    return X, y, class_names
+
+                # ✅ Otherwise, assume folder of images
                 subdirs = [d for d in os.listdir(tmpdirname) if os.path.isdir(os.path.join(tmpdirname, d))]
                 if subdirs:
                     ds = tf.keras.utils.image_dataset_from_directory(
@@ -50,7 +49,7 @@ def load_data_from_zip_or_csv(uploaded_file):
                     class_names = ds.class_names
                     return X, y, class_names
 
-                raise ValueError("No recognizable data found in ZIP file.")
+                raise ValueError("No image files found in ZIP. Upload images or MNIST-style .idx files.")
 
     else:
-        raise ValueError("Unsupported file format. Upload a .csv or .zip containing images or MNIST-style data.")
+        raise ValueError("Unsupported file type. Please upload a .csv or .zip file.")

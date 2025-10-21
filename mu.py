@@ -5,9 +5,9 @@ import tensorflow as tf
 import zipfile, os, tempfile
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from utils.data_utils import load_data_from_zip_or_csv
-from utils.sisa_utils import build_model, train_sisa_models, unlearn_class, get_ensemble_predictions
-from utils.viz_utils import plot_confusion_matrix, plot_probability_shift
+from data_utils import load_data_from_zip_or_csv
+from sisa_utils import build_model, train_sisa_models, unlearn_class
+from viz_utils import plot_confusion_matrix, plot_probability_shift
 
 st.set_page_config(page_title="Machine Unlearning Lab", layout="wide")
 st.title("Machine Unlearning Sandbox")

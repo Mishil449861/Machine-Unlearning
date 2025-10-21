@@ -40,18 +40,22 @@ def unlearn_class(models, shards, x_train, y_train, forget_class):
             models[i].fit(X_shard_new, y_shard_new, epochs=5, batch_size=128, verbose=0)
     return models
 
-def get_ensemble_predictions(models, X):
+def get_ensemble_predictions(models, X, return_proba=False):
     """
-    Combines predictions from all models in the ensemble by averaging their softmax outputs.
-    Returns the predicted class labels.
+    Combine ensemble model predictions by averaging their softmax outputs.
+    If return_proba=True, returns averaged probability matrix (n_samples x n_classes).
+    Otherwise returns predicted class labels.
     """
     preds = []
-
     for model in models:
         y_prob = model.predict(X, verbose=0)
+        if y_prob.ndim == 1:  # if model outputs single dimension
+            y_prob = y_prob.reshape(-1, 1)
         preds.append(y_prob)
 
-    # Average probabilities across ensemble members
     avg_pred = np.mean(preds, axis=0)
-    y_pred = np.argmax(avg_pred, axis=1)
-    return y_pred
+
+    if return_proba:
+        return avg_pred  # shape (n_samples, n_classes)
+    else:
+        return np.argmax(avg_pred, axis=1)

@@ -54,14 +54,9 @@ if "models" in st.session_state:
             forget_idx
         )
 
-        preds_before = get_ensemble_predictions(
-            st.session_state["models"],
-            st.session_state["x_test"]
-        )
-        preds_after = get_ensemble_predictions(
-            models,
-            st.session_state["x_test"]
-        )
+        preds_before = get_ensemble_predictions(st.session_state["models"], st.session_state["x_test"], return_proba=True)
+        preds_after = get_ensemble_predictions(st.session_state["models"], st.session_state["x_test"], return_proba=True)
+        y_pred = np.argmax(preds_after, axis=1)
 
         st.session_state["models"] = models
 

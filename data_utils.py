@@ -4,6 +4,7 @@ import tempfile
 import tensorflow as tf
 import numpy as np
 import pandas as pd
+from glob import glob
 
 def load_data_from_zip_or_csv(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -19,49 +20,48 @@ def load_data_from_zip_or_csv(uploaded_file):
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(tmp_dir)
 
-        # --- 1️⃣ Case A: ZIP has class subfolders (image_dataset_from_directory)
-        def find_root_with_classes(root):
-            for dirpath, dirnames, filenames in os.walk(root):
-                # folder that has >1 subdir (class folders)
-                if len(dirnames) > 1 and not filenames:
-                    return dirpath
-            return root
+        # Find image files anywhere inside
+        image_files = glob(os.path.join(tmp_dir, "**", "*.*"), recursive=True)
+        image_files = [f for f in image_files if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".gif"))]
 
-        root_dir = find_root_with_classes(tmp_dir)
-        subdirs = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
+        if not image_files:
+            raise ValueError("No image files found in ZIP. Make sure it contains .jpg, .png, etc.")
 
-        if subdirs:  # class folders exist
-            ds = tf.keras.utils.image_dataset_from_directory(
-                root_dir,
-                image_size=(64, 64),
-                batch_size=32
-            )
-            X, y = [], []
-            for images, labels in ds:
-                X.append(images.numpy())
-                y.append(labels.numpy())
-            X = np.concatenate(X)
-            y = np.concatenate(y)
-            X = X.reshape(X.shape[0], -1) / 255.0
-            class_names = ds.class_names
-            return X, y, class_names
+        # Detect if there are class subfolders
+        parent_dirs = [os.path.basename(os.path.dirname(f)) for f in image_files]
+        unique_parents = list(set(parent_dirs))
 
-        # --- 2️⃣ Case B: ZIP looks like MNIST (single folder with arrays)
-        npy_files = [f for f in os.listdir(tmp_dir) if f.endswith(".npy")]
-        if len(npy_files) >= 2:
-            # expected: X_train.npy and y_train.npy (or similar)
-            x_path = [f for f in npy_files if "x" in f or "images" in f][0]
-            y_path = [f for f in npy_files if "y" in f or "labels" in f][0]
-            X = np.load(os.path.join(tmp_dir, x_path))
-            y = np.load(os.path.join(tmp_dir, y_path))
-            X = X.reshape(X.shape[0], -1) / 255.0
-            return X, y, [str(c) for c in np.unique(y)]
+        # If all images are in one folder → assign dummy class
+        if len(unique_parents) == 1:
+            root_dir = os.path.join(tmp_dir, "auto_class")
+            os.makedirs(os.path.join(root_dir, "class0"), exist_ok=True)
+            for img_path in image_files:
+                os.rename(img_path, os.path.join(root_dir, "class0", os.path.basename(img_path)))
+        else:
+            # Move to new folder structure
+            root_dir = os.path.join(tmp_dir, "organized")
+            os.makedirs(root_dir, exist_ok=True)
+            for f in image_files:
+                label = os.path.basename(os.path.dirname(f))
+                target_dir = os.path.join(root_dir, label)
+                os.makedirs(target_dir, exist_ok=True)
+                os.rename(f, os.path.join(target_dir, os.path.basename(f)))
 
-        # --- 3️⃣ Case C: MNIST-like fallback (auto-load Fashion MNIST)
-        (X_train, y_train), _ = tf.keras.datasets.fashion_mnist.load_data()
-        X = X_train.reshape(X_train.shape[0], -1) / 255.0
-        y = y_train
-        class_names = [str(c) for c in np.unique(y)]
+        # Create dataset
+        ds = tf.keras.utils.image_dataset_from_directory(
+            root_dir,
+            image_size=(64, 64),
+            batch_size=32
+        )
+
+        X, y = [], []
+        for images, labels in ds:
+            X.append(images.numpy())
+            y.append(labels.numpy())
+        X = np.concatenate(X)
+        y = np.concatenate(y)
+        X = X.reshape(X.shape[0], -1) / 255.0
+        class_names = ds.class_names
         return X, y, class_names
 
     # ---- Handle CSV files ----
@@ -72,4 +72,4 @@ def load_data_from_zip_or_csv(uploaded_file):
         return X, y, [str(c) for c in np.unique(y)]
 
     else:
-        raise ValueError("Unsupported file format. Upload a CSV, ZIP of images, or MNIST-like data.")
+        raise ValueError("Unsupported file format. Upload a CSV or ZIP containing images.")

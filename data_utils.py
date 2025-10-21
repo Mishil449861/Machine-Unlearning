@@ -1,29 +1,62 @@
-import pandas as pd
+import os
+import zipfile
+import tempfile
+import tensorflow as tf
 import numpy as np
-import zipfile, tempfile, os
-from tensorflow.keras.preprocessing import image_dataset_from_directory
+import pandas as pd
 
 def load_data_from_zip_or_csv(uploaded_file):
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-        target_col = df.columns[-1]
-        X = df.drop(columns=[target_col]).values
-        y = df[target_col].values
-        class_names = sorted(list(set(y)))
-        return X, y, class_names
-
-    elif uploaded_file.name.endswith(".zip"):
+    file_name = uploaded_file.name.lower()
+    
+    # ---- Handle ZIP files ----
+    if file_name.endswith(".zip"):
         tmp_dir = tempfile.mkdtemp()
-        with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
+        zip_path = os.path.join(tmp_dir, "uploaded.zip")
+
+        with open(zip_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(tmp_dir)
 
-        ds = image_dataset_from_directory(tmp_dir, image_size=(64, 64), batch_size=32)
-        class_names = ds.class_names
+        # find the first directory that has image files
+        root_dir = tmp_dir
+        subdirs = [os.path.join(root_dir, d) for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
+
+        # if only one folder inside, go one level deeper
+        if len(subdirs) == 1:
+            root_dir = subdirs[0]
+
+        # ensure at least one subfolder exists
+        class_dirs = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
+        if not class_dirs:
+            raise ValueError("ZIP must contain subfolders (one per class). Example: cats/, dogs/")
+
+        ds = tf.keras.utils.image_dataset_from_directory(
+            root_dir,
+            image_size=(64, 64),
+            batch_size=32
+        )
+
         X, y = [], []
-        for imgs, labels in ds:
-            X.append(imgs.numpy())
+        class_names = ds.class_names
+
+        for images, labels in ds:
+            X.append(images.numpy())
             y.append(labels.numpy())
+
         X = np.concatenate(X)
         y = np.concatenate(y)
-        X = X.reshape(len(X), -1) / 255.0  # flatten and normalize
+        X = X.reshape(X.shape[0], -1) / 255.0  # flatten and normalize
+
         return X, y, class_names
+
+    # ---- Handle CSV files ----
+    elif file_name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+        y = df.iloc[:, -1].values
+        X = df.iloc[:, :-1].values
+        return X, y, [str(c) for c in np.unique(y)]
+
+    else:
+        raise ValueError("Unsupported file format. Please upload a CSV or a ZIP of images.")

@@ -19,18 +19,22 @@ def load_data_from_zip_or_csv(uploaded_file):
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(tmp_dir)
 
-        # find the first directory that has image files
-        root_dir = tmp_dir
-        subdirs = [os.path.join(root_dir, d) for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
+        # Try to find directory with subfolders (class dirs)
+        def find_root_with_classes(root):
+            for dirpath, dirnames, filenames in os.walk(root):
+                if len(dirnames) > 1 and not filenames:
+                    return dirpath
+            return root  # fallback
 
-        # if only one folder inside, go one level deeper
-        if len(subdirs) == 1:
-            root_dir = subdirs[0]
+        root_dir = find_root_with_classes(tmp_dir)
 
-        # ensure at least one subfolder exists
+        # Check that we have at least one subfolder
         class_dirs = [d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))]
         if not class_dirs:
-            raise ValueError("ZIP must contain subfolders (one per class). Example: cats/, dogs/")
+            raise ValueError(
+                "ZIP must contain subfolders (one per class). "
+                "Example: cats/, dogs/, etc."
+            )
 
         ds = tf.keras.utils.image_dataset_from_directory(
             root_dir,

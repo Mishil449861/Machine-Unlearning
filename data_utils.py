@@ -1,55 +1,92 @@
 import os
 import zipfile
-import numpy as np
-import tensorflow as tf
-import pandas as pd
 import tempfile
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+import tensorflow as tf
 
 def load_data_from_zip_or_csv(uploaded_file):
-    filename = uploaded_file.name.lower()
+    """
+    Handles CSV, ZIP of images, or ZIP of tabular/text files.
+    Returns X, y, class_names.
+    """
+    file_name = uploaded_file.name.lower()
 
-    # Case 1: CSV dataset
-    if filename.endswith(".csv"):
+    # ---------------- CSV Upload ----------------
+    if file_name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
-        X = df.iloc[:, :-1].values
-        y = df.iloc[:, -1].values
-        class_names = sorted(df.iloc[:, -1].unique().astype(str))
-        return X, y, class_names
+        return _process_dataframe(df)
 
-    # Case 2: ZIP dataset
-    elif filename.endswith(".zip"):
-        with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                zip_ref.extractall(tmpdirname)
-                files = os.listdir(tmpdirname)
+    # ---------------- ZIP Upload ----------------
+    elif file_name.endswith(".zip"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "data.zip")
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
 
-                # ✅ Detect MNIST / Fashion-MNIST format (idx files)
-                if any("idx" in f for f in files):
-                    # Check which one it might be
-                    if any("fashion" in f for f in files):
-                        (X_train, y_train), _ = tf.keras.datasets.fashion_mnist.load_data()
-                    else:
-                        (X_train, y_train), _ = tf.keras.datasets.mnist.load_data()
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(tmpdir)
 
-                    # Flatten and normalize
-                    X = X_train.reshape((X_train.shape[0], -1)).astype("float32") / 255.0
-                    y = y_train
-                    class_names = [str(i) for i in sorted(np.unique(y))]
-                    return X, y, class_names
+            # Find files inside ZIP
+            extracted_files = []
+            for root, _, files in os.walk(tmpdir):
+                for file in files:
+                    extracted_files.append(os.path.join(root, file))
 
-                # ✅ Otherwise, assume folder of images
-                subdirs = [d for d in os.listdir(tmpdirname) if os.path.isdir(os.path.join(tmpdirname, d))]
-                if subdirs:
-                    ds = tf.keras.utils.image_dataset_from_directory(
-                        tmpdirname, image_size=(64, 64), batch_size=32
-                    )
-                    X, y = zip(*[(x.numpy(), y.numpy()) for x, y in ds.unbatch()])
-                    X = np.stack(X)
-                    y = np.array(y)
-                    class_names = ds.class_names
-                    return X, y, class_names
+            # Case 1: ZIP of images (folders per class)
+            if any(f.lower().endswith((".png", ".jpg", ".jpeg")) for f in extracted_files):
+                ds = tf.keras.utils.image_dataset_from_directory(
+                    tmpdir,
+                    image_size=(28, 28),
+                    color_mode="grayscale",
+                    batch_size=None
+                )
+                X = np.array([x.numpy() for x, _ in ds])
+                X = X.reshape(X.shape[0], -1)
+                y = np.array([y.numpy() for _, y in ds])
+                y = y.flatten()
+                class_names = ds.class_names
+                return X, y, class_names
 
-                raise ValueError("No image files found in ZIP. Upload images or MNIST-style .idx files.")
+            # Case 2: ZIP of CSVs
+            elif any(f.lower().endswith(".csv") for f in extracted_files):
+                csvs = [pd.read_csv(f) for f in extracted_files if f.endswith(".csv")]
+                df = pd.concat(csvs, ignore_index=True)
+                return _process_dataframe(df)
+
+            else:
+                raise ValueError(
+                    "Unsupported ZIP format. Please upload a ZIP containing images or CSV files."
+                )
 
     else:
         raise ValueError("Unsupported file type. Please upload a .csv or .zip file.")
+
+
+def _process_dataframe(df):
+    """Cleans tabular CSV and returns (X, y, class_names)."""
+    df = df.dropna()
+    # Try to detect the target column
+    y_col = None
+    for col in df.columns:
+        if col.lower() in ["label", "target", "class", "y"]:
+            y_col = col
+            break
+
+    if y_col is None:
+        # fallback — assume last column is target
+        y_col = df.columns[-1]
+
+    y = df[y_col]
+    X = df.drop(columns=[y_col])
+
+    # Encode target
+    le = LabelEncoder()
+    y = le.fit_transform(y)
+    class_names = list(le.classes_)
+
+    # Convert categorical columns to numeric
+    X = pd.get_dummies(X, drop_first=True)
+
+    return X.values, y, class_names

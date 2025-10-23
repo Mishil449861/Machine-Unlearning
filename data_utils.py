@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 import tensorflow as tf
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 def load_data_from_zip_or_csv(uploaded_file):
     """
@@ -63,28 +64,43 @@ def load_data_from_zip_or_csv(uploaded_file):
     else:
         raise ValueError("Unsupported file type. Please upload a .csv or .zip file.")
 
-
 def _process_dataframe(df):
-    """Cleans tabular CSV and returns (X, y, class_names)."""
+    """Cleans tabular CSV and returns (X, y, class_names). Handles text columns."""
     df = df.dropna()
-    # Try to detect the target column
+
+    # Detect target column
     y_col = None
     for col in df.columns:
-        if col.lower() in ["label", "target", "class", "y"]:
+        if col.lower() in ["label", "target", "class", "y", "status"]:
             y_col = col
             break
 
     if y_col is None:
-        # fallback — assume last column is target
-        y_col = df.columns[-1]
+        y_col = df.columns[-1]  # fallback to last column
 
     y = df[y_col]
     X = df.drop(columns=[y_col])
 
-    # Encode target
+    # Encode target labels
     le = LabelEncoder()
     y = le.fit_transform(y)
     class_names = list(le.classes_)
+
+    # Handle text columns (like 'statement')
+    text_cols = X.select_dtypes(include=['object']).columns.tolist()
+
+    if text_cols:
+        # Combine all text columns into one (if multiple)
+        X_text = X[text_cols].astype(str).apply(lambda x: " ".join(x), axis=1)
+
+        vectorizer = TfidfVectorizer(max_features=1000)
+        X_vec = vectorizer.fit_transform(X_text).toarray()
+
+        X = pd.DataFrame(X_vec)
+    else:
+        X = pd.get_dummies(X, drop_first=True)
+
+    return X.values, y, class_names
 
     # Convert categorical columns to numeric
     X = pd.get_dummies(X, drop_first=True)

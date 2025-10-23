@@ -8,6 +8,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from data_utils import load_data_from_zip_or_csv
 from viz_utils import plot_confusion_matrix, plot_probability_shift
 from sisa_utils import build_model, train_sisa_models, unlearn_class, get_ensemble_predictions
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # suppress info and warnings
 
 st.set_page_config(page_title="Machine Unlearning Lab", layout="wide")
 st.title("Machine Unlearning Sandbox")

@@ -1,3 +1,6 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
 def plot_probability_shift(preds_before, preds_after, class_names):
     mean_before = np.mean(preds_before, axis=0)
     mean_after = np.mean(preds_after, axis=0)

@@ -1,23 +1,38 @@
-import matplotlib.pyplot as plt
-import numpy as np
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+if st.button("Forget and Visualize"):
+    forget_idx = st.session_state["class_names"].index(forget_class)
 
-def plot_confusion_matrix(y_true, y_pred, class_names):
-    cm = confusion_matrix(y_true, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
-    fig, ax = plt.subplots(figsize=(6, 6))
-    disp.plot(ax=ax, cmap='Blues', colorbar=False)
-    plt.title("Confusion Matrix")
-    return fig
+    # Store predictions BEFORE unlearning
+    preds_before = get_ensemble_predictions(
+        st.session_state["models"],
+        st.session_state["x_test"],
+        return_proba=True
+    )
 
-def plot_probability_shift(preds_before, preds_after, class_names):
-    mean_before = np.mean(preds_before, axis=0)
-    mean_after = np.mean(preds_after, axis=0)
-    diff = mean_after - mean_before
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(class_names, diff)
-    ax.set_title("Probability Shift per Class (After Forgetting)")
-    ax.set_ylabel("Δ Probability (After - Before)")
-    ax.axhline(0, color='gray', linestyle='--')
-    plt.xticks(rotation=45)
-    return fig
+    # Perform unlearning
+    models_after = unlearn_class(
+        st.session_state["models"],
+        st.session_state["shards"],
+        st.session_state["x_train"],
+        st.session_state["y_train"],
+        forget_idx
+    )
+
+    # Predictions AFTER unlearning
+    preds_after = get_ensemble_predictions(
+        models_after,
+        st.session_state["x_test"],
+        return_proba=True
+    )
+
+    # Update session
+    st.session_state["models"] = models_after
+
+    # Visualize
+    st.subheader("Probability Shift After Forgetting")
+    fig_shift = plot_probability_shift(preds_before, preds_after, st.session_state["class_names"])
+    st.pyplot(fig_shift)
+
+    st.subheader("Confusion Matrix After Forgetting")
+    y_pred = np.argmax(preds_after, axis=1)
+    fig_cm = plot_confusion_matrix(st.session_state["y_test"], y_pred, st.session_state["class_names"])
+    st.pyplot(fig_cm)

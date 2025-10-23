@@ -1,70 +1,92 @@
-import streamlit as st
-import pandas as pd
+import os
+import zipfile
+import tempfile
 import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
 import tensorflow as tf
-import zipfile, os, tempfile
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from data_utils import load_data_from_zip_or_csv
-from viz_utils import plot_confusion_matrix, plot_probability_shift
-from sisa_utils import build_model, train_sisa_models, unlearn_class, get_ensemble_predictions
 
-st.set_page_config(page_title="Machine Unlearning Lab", layout="wide")
-st.title("Machine Unlearning Sandbox")
-st.caption("Upload a dataset (CSV or ZIP), train SISA models, and visualize forgetting behavior.")
+def load_data_from_zip_or_csv(uploaded_file):
+    """
+    Handles CSV, ZIP of images, or ZIP of tabular/text files.
+    Returns X, y, class_names.
+    """
+    file_name = uploaded_file.name.lower()
 
-uploaded_file = st.file_uploader("Upload Dataset (CSV or ZIP)", type=["csv", "zip"])
+    # ---------------- CSV Upload ----------------
+    if file_name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+        return _process_dataframe(df)
 
-if uploaded_file:
-    with st.spinner("Loading dataset..."):
-        X, y, class_names = load_data_from_zip_or_csv(uploaded_file)
-    st.success(f"Dataset loaded with shape {X.shape}")
-    st.write(f"Detected {len(class_names)} classes: {class_names}")
+    # ---------------- ZIP Upload ----------------
+    elif file_name.endswith(".zip"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "data.zip")
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
 
-    # --- Split and standardize ---
-    X = StandardScaler().fit_transform(X)
-    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(tmpdir)
 
-    # --- Training ---
-    num_shards = st.slider("Number of SISA Shards", 2, 10, 5)
-    if st.button("Train SISA Models"):
-        with st.spinner("Training shards..."):
-            sisa_models, shards = train_sisa_models(x_train, y_train, num_shards)
-        st.session_state.update({
-            "models": sisa_models,
-            "shards": shards,
-            "x_train": x_train,
-            "y_train": y_train,
-            "x_test": x_test,
-            "y_test": y_test,
-            "class_names": class_names
-        })
-        st.success("Training complete!")
+            # Find files inside ZIP
+            extracted_files = []
+            for root, _, files in os.walk(tmpdir):
+                for file in files:
+                    extracted_files.append(os.path.join(root, file))
 
-# --- Unlearning and Visualization ---
-if "models" in st.session_state:
-    forget_class = st.selectbox("🧹 Select Class to Forget:", st.session_state["class_names"])
-    if st.button("Forget and Visualize"):
-        forget_idx = st.session_state["class_names"].index(forget_class)
-        models = unlearn_class(
-            st.session_state["models"],
-            st.session_state["shards"],
-            st.session_state["x_train"],
-            st.session_state["y_train"],
-            forget_idx
-        )
+            # Case 1: ZIP of images (folders per class)
+            if any(f.lower().endswith((".png", ".jpg", ".jpeg")) for f in extracted_files):
+                ds = tf.keras.utils.image_dataset_from_directory(
+                    tmpdir,
+                    image_size=(28, 28),
+                    color_mode="grayscale",
+                    batch_size=None
+                )
+                X = np.array([x.numpy() for x, _ in ds])
+                X = X.reshape(X.shape[0], -1)
+                y = np.array([y.numpy() for _, y in ds])
+                y = y.flatten()
+                class_names = ds.class_names
+                return X, y, class_names
 
-        preds_before = get_ensemble_predictions(st.session_state["models"], st.session_state["x_test"], return_proba=True)
-        preds_after = get_ensemble_predictions(st.session_state["models"], st.session_state["x_test"], return_proba=True)
-        y_pred = np.argmax(preds_after, axis=1)
+            # Case 2: ZIP of CSVs
+            elif any(f.lower().endswith(".csv") for f in extracted_files):
+                csvs = [pd.read_csv(f) for f in extracted_files if f.endswith(".csv")]
+                df = pd.concat(csvs, ignore_index=True)
+                return _process_dataframe(df)
 
-        st.session_state["models"] = models
+            else:
+                raise ValueError(
+                    "Unsupported ZIP format. Please upload a ZIP containing images or CSV files."
+                )
 
-        st.subheader("Probability Shift After Forgetting")
-        fig_shift = plot_probability_shift(preds_before, preds_after, st.session_state["class_names"])
-        st.pyplot(fig_shift)
+    else:
+        raise ValueError("Unsupported file type. Please upload a .csv or .zip file.")
 
-        st.subheader("Confusion Matrix After Forgetting")
-        y_pred = np.argmax(preds_after, axis=1)
-        fig_cm = plot_confusion_matrix(st.session_state["y_test"], y_pred, st.session_state["class_names"])
-        st.pyplot(fig_cm)
+
+def _process_dataframe(df):
+    """Cleans tabular CSV and returns (X, y, class_names)."""
+    df = df.dropna()
+    # Try to detect the target column
+    y_col = None
+    for col in df.columns:
+        if col.lower() in ["label", "target", "class", "y"]:
+            y_col = col
+            break
+
+    if y_col is None:
+        # fallback — assume last column is target
+        y_col = df.columns[-1]
+
+    y = df[y_col]
+    X = df.drop(columns=[y_col])
+
+    # Encode target
+    le = LabelEncoder()
+    y = le.fit_transform(y)
+    class_names = list(le.classes_)
+
+    # Convert categorical columns to numeric
+    X = pd.get_dummies(X, drop_first=True)
+
+    return X.values, y, class_names

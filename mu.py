@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 
 # Custom utility imports
 from data_utils import load_data_from_zip_or_csv
-from viz_utils import plot_confusion_matrix, plot_probability_shift
+from viz_utils import plot_probability_shift
 from sisa_utils import (
     build_model,
     train_sisa_models,

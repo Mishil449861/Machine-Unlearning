@@ -1,3 +1,5 @@
+# Suppress TensorFlow info and warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,8 +18,7 @@ from sisa_utils import (
     get_ensemble_predictions
 )
 
-# Suppress TensorFlow info and warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 
 # Streamlit page setup
 st.set_page_config(page_title="Machine Unlearning Lab", layout="wide")

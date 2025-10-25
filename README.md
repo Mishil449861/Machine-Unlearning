@@ -22,6 +22,6 @@ This repository implements components to facilitate research and experimentation
 ### Installation  
 Clone this repository:  
 ```bash  
-git clone https://github.com/YourUsername/Machine-Unlearning.git  
+git clone https://github.com/Mishil449861/Machine-Unlearning.git  
 cd Machine-Unlearning  
 pip install -r requirements.txt

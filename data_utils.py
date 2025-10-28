@@ -40,6 +40,8 @@ def load_data_from_zip_or_csv(uploaded_file):
             for root, _, files in os.walk(tmpdir):
                 for file in files:
                     extracted_files.append(os.path.join(root, file))
+            print("DEBUG – extracted files:", extracted_files)
+            st.write("Detected files in ZIP:", extracted_files)
 
             # Case 1: ZIP of images (folders per class)
             if any(f.lower().endswith((".png", ".jpg", ".jpeg")) for f in extracted_files):

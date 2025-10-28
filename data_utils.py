@@ -7,9 +7,10 @@ from sklearn.preprocessing import LabelEncoder
 import tensorflow as tf
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+
 def load_data_from_zip_or_csv(uploaded_file):
     """
-    Handles CSV, ZIP of images, or ZIP of tabular/text files.
+    Handles CSV, Excel, or ZIP of images/tabular/text files.
     Returns X, y, class_names.
     """
     file_name = uploaded_file.name.lower()
@@ -17,6 +18,11 @@ def load_data_from_zip_or_csv(uploaded_file):
     # ---------------- CSV Upload ----------------
     if file_name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
+        return _process_dataframe(df)
+
+    # ---------------- EXCEL Upload ----------------
+    elif file_name.endswith(".xlsx"):
+        df = pd.read_excel(uploaded_file)
         return _process_dataframe(df)
 
     # ---------------- ZIP Upload ----------------
@@ -28,10 +34,7 @@ def load_data_from_zip_or_csv(uploaded_file):
 
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(tmpdir)
-    # ---------------- EXCEL Upload ----------------           
-    elif uploaded_file.name.endswith(".xlsx"):
-    df = pd.read_excel(uploaded_file)
-    return _process_dataframe(df)
+
             # Find files inside ZIP
             extracted_files = []
             for root, _, files in os.walk(tmpdir):
@@ -55,7 +58,7 @@ def load_data_from_zip_or_csv(uploaded_file):
 
             # Case 2: ZIP of CSVs
             elif any(f.lower().endswith(".csv") for f in extracted_files):
-                csvs = [pd.read_csv(f) for f in extracted_files if f.endswith(".csv")]
+                csvs = [pd.read_csv(f) for f in extracted_files if f.lower().endswith(".csv")]
                 df = pd.concat(csvs, ignore_index=True)
                 return _process_dataframe(df)
 
@@ -65,10 +68,11 @@ def load_data_from_zip_or_csv(uploaded_file):
                 )
 
     else:
-        raise ValueError("Unsupported file type. Please upload a .csv or .zip file.")
+        raise ValueError("Unsupported file type. Please upload a .csv, .xlsx, or .zip file.")
+
 
 def _process_dataframe(df):
-    """Cleans tabular CSV and returns (X, y, class_names). Handles text columns."""
+    """Cleans tabular CSV/Excel and returns (X, y, class_names). Handles text columns."""
     df = df.dropna()
 
     # Detect target column
@@ -77,7 +81,6 @@ def _process_dataframe(df):
         if col.lower() in ["label", "target", "class", "y", "status"]:
             y_col = col
             break
-
     if y_col is None:
         y_col = df.columns[-1]  # fallback to last column
 
@@ -89,23 +92,14 @@ def _process_dataframe(df):
     y = le.fit_transform(y)
     class_names = list(le.classes_)
 
-    # Handle text columns (like 'statement')
-    text_cols = X.select_dtypes(include=['object']).columns.tolist()
-
+    # Handle text columns
+    text_cols = X.select_dtypes(include=["object"]).columns.tolist()
     if text_cols:
-        # Combine all text columns into one (if multiple)
         X_text = X[text_cols].astype(str).apply(lambda x: " ".join(x), axis=1)
-
         vectorizer = TfidfVectorizer(max_features=1000)
         X_vec = vectorizer.fit_transform(X_text).toarray()
-
         X = pd.DataFrame(X_vec)
     else:
         X = pd.get_dummies(X, drop_first=True)
-
-    return X.values, y, class_names
-
-    # Convert categorical columns to numeric
-    X = pd.get_dummies(X, drop_first=True)
 
     return X.values, y, class_names

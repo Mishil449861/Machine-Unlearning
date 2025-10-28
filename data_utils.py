@@ -7,11 +7,20 @@ import streamlit as st
 from sklearn.preprocessing import LabelEncoder
 from sklearn.feature_extraction.text import TfidfVectorizer
 import tensorflow as tf
+import struct
+
+
+def read_idx(filename):
+    """Reads IDX formatted binary files (used in MNIST/Fashion-MNIST)."""
+    with open(filename, "rb") as f:
+        zero, data_type, dims = struct.unpack(">HBB", f.read(4))
+        shape = tuple(struct.unpack(">I", f.read(4))[0] for _ in range(dims))
+        return np.frombuffer(f.read(), dtype=np.uint8).reshape(shape)
 
 
 def load_data_from_zip_or_csv(uploaded_file):
     """
-    Handles CSV, Excel, or ZIP of images/tabular/text files.
+    Handles CSV, Excel, IDX, or ZIP containing images/tabular/text files.
     Returns X, y, class_names.
     """
     file_name = uploaded_file.name.lower()
@@ -78,8 +87,31 @@ def load_data_from_zip_or_csv(uploaded_file):
                     raise ImportError("Please install 'openpyxl' to read Excel files (pip install openpyxl).")
                 return _process_dataframe(df)
 
+            # --- Case 4: ZIP of IDX files (MNIST/Fashion-MNIST) ---
+            idx_images = [f for f in extracted_files if "images" in f.lower() and f.lower().endswith(".idx3-ubyte")]
+            idx_labels = [f for f in extracted_files if "labels" in f.lower() and f.lower().endswith(".idx1-ubyte")]
+
+            if idx_images and idx_labels:
+                X = read_idx(idx_images[0])
+                y = read_idx(idx_labels[0])
+
+                # Flatten and normalize images
+                X = X.reshape(X.shape[0], -1) / 255.0
+                y = y.flatten()
+
+                # Default class names for Fashion-MNIST
+                if "fashion" in file_name or "fmnist" in file_name:
+                    class_names = [
+                        "T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
+                        "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"
+                    ]
+                else:
+                    class_names = [str(i) for i in range(10)]
+
+                return X, y, class_names
+
             # --- Unsupported content ---
-            raise ValueError("Unsupported ZIP format. Please upload a ZIP containing images, CSVs, or Excel files.")
+            raise ValueError("Unsupported ZIP format. Please upload a ZIP containing images, CSVs, Excels, or IDX files.")
 
     else:
         raise ValueError("Unsupported file type. Please upload a .csv, .xlsx, or .zip file.")
@@ -124,5 +156,4 @@ def _process_dataframe(df):
     else:
         X = pd.get_dummies(X, drop_first=True)
 
-    # --- Return numpy arrays ---
     return X.values, y, class_names

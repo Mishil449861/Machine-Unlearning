@@ -26,7 +26,7 @@ st.title("Machine Unlearning Sandbox")
 st.caption("Upload a dataset (CSV or ZIP), train SISA models, and visualize forgetting behavior.")
 
 # --- File Upload ---
-uploaded_file = st.file_uploader("Upload Dataset (CSV or ZIP)", type=["csv", "zip"])
+uploaded_file = st.file_uploader("Upload Dataset (CSV or ZIP or excel)", type=["csv", "zip", "xlsx"])
 
 if uploaded_file:
     with st.spinner("Loading dataset..."):

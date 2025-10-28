@@ -1,88 +1,128 @@
 import os
-import io
 import zipfile
-import pandas as pd
+import tempfile
 import numpy as np
-from PIL import Image
+import pandas as pd
+import streamlit as st
+from sklearn.preprocessing import LabelEncoder
+from sklearn.feature_extraction.text import TfidfVectorizer
+import tensorflow as tf
+
 
 def load_data_from_zip_or_csv(uploaded_file):
     """
-    Load dataset from a Streamlit-uploaded file.
-    Supports:
-      - CSV
-      - Excel (XLSX)
-      - ZIP (images in subfolders OR CSV/Excel inside ZIP)
+    Handles CSV, Excel, or ZIP of images/tabular/text files.
+    Returns X, y, class_names.
     """
-    def _process_dataframe(df):
-        # auto-detect label column if present
-        label_col = None
-        for col in df.columns:
-            if col.lower() in ["label", "class", "target", "y"]:
-                label_col = col
-                break
-        if label_col is None:
-            raise ValueError("No label column found in dataset.")
-        X = df.drop(columns=[label_col]).values
-        y = df[label_col].values
-        class_names = sorted(df[label_col].unique().tolist())
-        return X, y, class_names
+    file_name = uploaded_file.name.lower()
 
-    # --- handle CSV ---
-    if uploaded_file.name.endswith(".csv"):
+    # ---------------- CSV Upload ----------------
+    if file_name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
         return _process_dataframe(df)
 
-    # --- handle Excel ---
-    if uploaded_file.name.endswith(".xlsx"):
-        df = pd.read_excel(uploaded_file)
+    # ---------------- EXCEL Upload ----------------
+    elif file_name.endswith(".xlsx"):
+        try:
+            df = pd.read_excel(uploaded_file, engine="openpyxl")
+        except ImportError:
+            raise ImportError("Please install 'openpyxl' to read Excel files (pip install openpyxl).")
         return _process_dataframe(df)
 
-    # --- handle ZIP ---
-    if uploaded_file.name.endswith(".zip"):
-        with zipfile.ZipFile(uploaded_file, "r") as zf:
-            # Get all file names
-            names = [n for n in zf.namelist() if not n.endswith("/")]
-            csvs = [n for n in names if n.lower().endswith(".csv")]
-            excels = [n for n in names if n.lower().endswith((".xlsx", ".xls"))]
-            images = [n for n in names if n.lower().endswith((".png", ".jpg", ".jpeg"))]
+    # ---------------- ZIP Upload ----------------
+    elif file_name.endswith(".zip"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "data.zip")
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
 
-            # --- case 1: ZIP contains CSV ---
-            if csvs:
-                with zf.open(csvs[0]) as f:
-                    df = pd.read_csv(f)
-                return _process_dataframe(df)
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(tmpdir)
 
-            # --- case 2: ZIP contains Excel ---
-            if excels:
-                with zf.open(excels[0]) as f:
-                    df = pd.read_excel(f)
-                return _process_dataframe(df)
+            extracted_files = []
+            for root, _, files in os.walk(tmpdir):
+                for file in files:
+                    extracted_files.append(os.path.join(root, file))
 
-            # --- case 3: ZIP contains image folders ---
+            st.write("Detected files in ZIP:", extracted_files)
+
+            # --- Case 1: ZIP of images ---
+            images = [f for f in extracted_files if f.lower().endswith((".png", ".jpg", ".jpeg"))]
             if images:
-                from sklearn.preprocessing import LabelEncoder
-                img_data, labels = [], []
-                for name in images:
-                    # assume folder structure class_name/image.jpg
-                    parts = name.split("/")
-                    if len(parts) < 2:
-                        continue
-                    label = parts[-2]
-                    with zf.open(name) as f:
-                        img = Image.open(f).convert("RGB").resize((64, 64))
-                        img_data.append(np.array(img).flatten())
-                        labels.append(label)
-                if not img_data:
-                    raise ValueError("No valid images found in ZIP.")
-                X = np.array(img_data)
-                le = LabelEncoder()
-                y = le.fit_transform(labels)
-                return X, y, le.classes_.tolist()
+                ds = tf.keras.utils.image_dataset_from_directory(
+                    tmpdir,
+                    image_size=(28, 28),
+                    color_mode="grayscale",
+                    batch_size=None
+                )
+                X = np.array([x.numpy() for x, _ in ds])
+                X = X.reshape(X.shape[0], -1)
+                y = np.array([y.numpy() for _, y in ds]).flatten()
+                class_names = ds.class_names
+                return X, y, class_names
 
-            # --- fallback ---
-            raise ValueError(
-                "Unsupported ZIP format. ZIP must contain either CSV, Excel, or images in subfolders."
-            )
+            # --- Case 2: ZIP of CSV files ---
+            csvs = [f for f in extracted_files if f.lower().endswith(".csv")]
+            if csvs:
+                df_list = [pd.read_csv(f) for f in csvs]
+                df = pd.concat(df_list, ignore_index=True)
+                return _process_dataframe(df)
 
-    # --- unsupported file ---
-    raise ValueError("Unsupported file type. Please upload a CSV, Excel, or ZIP file.")
+            # --- Case 3: ZIP of Excel files ---
+            excels = [f for f in extracted_files if f.lower().endswith(".xlsx")]
+            if excels:
+                try:
+                    with open(excels[0], "rb") as f:
+                        df = pd.read_excel(f, engine="openpyxl")
+                except ImportError:
+                    raise ImportError("Please install 'openpyxl' to read Excel files (pip install openpyxl).")
+                return _process_dataframe(df)
+
+            # --- Unsupported content ---
+            raise ValueError("Unsupported ZIP format. Please upload a ZIP containing images, CSVs, or Excel files.")
+
+    else:
+        raise ValueError("Unsupported file type. Please upload a .csv, .xlsx, or .zip file.")
+
+
+def _process_dataframe(df):
+    """
+    Cleans tabular CSV/Excel and returns (X, y, class_names).
+    Handles text columns and fallback for label detection.
+    """
+    df = df.dropna()
+    if df.empty:
+        raise ValueError("Dataset is empty after dropping missing values.")
+
+    # --- Detect label column ---
+    y_col = None
+    for col in df.columns:
+        if col.lower() in ["label", "target", "class", "y", "status"]:
+            y_col = col
+            break
+
+    if y_col is None:
+        y_col = df.columns[-1]
+        st.warning(f"No label column detected. Using the last column '{y_col}' as target.")
+
+    # --- Separate X and y ---
+    y = df[y_col]
+    X = df.drop(columns=[y_col])
+
+    # --- Encode target ---
+    le = LabelEncoder()
+    y = le.fit_transform(y)
+    class_names = list(le.classes_)
+
+    # --- Handle text columns ---
+    text_cols = X.select_dtypes(include=["object"]).columns.tolist()
+    if text_cols:
+        X_text = X[text_cols].astype(str).apply(lambda x: " ".join(x), axis=1)
+        vectorizer = TfidfVectorizer(max_features=1000)
+        X_vec = vectorizer.fit_transform(X_text).toarray()
+        X = pd.DataFrame(X_vec)
+    else:
+        X = pd.get_dummies(X, drop_first=True)
+
+    # --- Return numpy arrays ---
+    return X.values, y, class_names

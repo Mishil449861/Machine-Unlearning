@@ -1,10 +1,6 @@
 # Machine-Unlearning  
 A Python toolkit for experimenting with machine unlearning, built around the SISA (Sharded, Isolated, Sliced, Aggregated) framework.
 
-## Background & Motivation  
-Machine learning systems are increasingly required to **“forget”** or remove contributions of particular data points (e.g., for privacy, regulatory, or data-governance reasons).  
-This repository implements components to facilitate research and experimentation around the concept of *machine unlearning* — specifically using the SISA approach (Sharded, Isolated, Sliced, Aggregated) to support efficient unlearning of individual or groups of training examples.
-
 ## Features  
 - Data loading / preprocessing utilities (`data_utils.py`).  
 - SISA-style utilities for sharding, slicing, isolating and aggregating training portions (`sisa_utils.py`).  

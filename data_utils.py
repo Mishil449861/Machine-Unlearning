@@ -28,7 +28,10 @@ def load_data_from_zip_or_csv(uploaded_file):
 
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(tmpdir)
-
+    # ---------------- EXCEL Upload ----------------           
+    elif uploaded_file.name.endswith(".xlsx"):
+    df = pd.read_excel(uploaded_file)
+    return _process_dataframe(df)
             # Find files inside ZIP
             extracted_files = []
             for root, _, files in os.walk(tmpdir):
